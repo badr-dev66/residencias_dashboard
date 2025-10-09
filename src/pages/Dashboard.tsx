@@ -22,10 +22,11 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const weekStart = getWeekStartISO();
   const today = todayISO();
 
-  // --- Load data ---
   useEffect(() => {
     (async () => {
       setLoading(true);
+
+      // 1) Load residencias (patients/floors included)
       const { data: rdata, error: rerr } = await supabase
         .from("residencias")
         .select("*")
@@ -35,10 +36,10 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         setLoading(false);
         return;
       }
-
       const residencias = (rdata || []) as Residencia[];
       setResis(residencias);
 
+      // 2) Load checklist for current week
       const { data: cdata, error: cerr } = await supabase
         .from("checklist_items")
         .select("*")
@@ -52,7 +53,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       const map: MapChecklist = {};
       (cdata || []).forEach((it) => (map[it.residencia_id] = it as ChecklistItem));
 
-      // Auto-create missing rows
+      // 3) Auto-create missing rows (also fill suggested dates)
       const patches: any[] = [];
       for (const r of residencias) {
         const existing = map[r.id];
@@ -62,6 +63,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             week_start: weekStart,
             weekly_changes_done: false,
             repasado: false,
+            emblistada: false, // NEW
             day_to_make: getSuggestedPrepDate(weekStart, r.fixed_delivery_day),
             day_to_deliver: getSuggestedDeliverDate(weekStart, r.fixed_delivery_day),
             notes: null,
@@ -84,10 +86,11 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     })();
   }, [weekStart]);
 
-  // --- Hooks always before render ---
+  // -------- Derived data (keep hooks BEFORE any early returns) --------
   const filteredResis = useMemo(() => {
     const s = q.trim().toLowerCase();
     const base = s ? resis.filter((r) => r.name.toLowerCase().includes(s)) : resis;
+
     if (filter === "prepToday") {
       return base.filter((r) => itemsByResi[r.id]?.day_to_make === today);
     }
@@ -103,7 +106,10 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       pending = 0;
     for (const r of resis) {
       const it = itemsByResi[r.id];
-      const done = (it?.weekly_changes_done && it?.repasado) ?? false;
+      const done =
+        (it?.weekly_changes_done ?? false) &&
+        (it?.repasado ?? false) &&
+        (it?.emblistada ?? false); // NEW
       if (done) prepared++;
       if (it?.day_to_deliver) delivered++;
       if (!done) pending++;
@@ -119,8 +125,22 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       Jueves: [],
       Viernes: [],
     };
-    filteredResis.forEach((r) => g[r.fixed_delivery_day].push(r));
-    ORDER.forEach((d) => g[d].sort((a, b) => a.name.localeCompare(b.name)));
+    for (const r of filteredResis) {
+      const day = r.fixed_delivery_day as Weekday | null;
+      if (day && g[day]) g[day].push(r);
+    }
+    // Sort by workload: patients desc -> floors desc -> name
+    ORDER.forEach((d) =>
+      g[d].sort((a, b) => {
+        const pa = a.patients ?? 0;
+        const pb = b.patients ?? 0;
+        if (pb !== pa) return pb - pa;
+        const fa = a.floors ?? 1;
+        const fb = b.floors ?? 1;
+        if (fb !== fa) return fb - fa;
+        return a.name.localeCompare(b.name);
+      })
+    );
     return g;
   }, [filteredResis]);
 
@@ -140,6 +160,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     );
   }
 
+  // -------- helpers --------
   async function savePatch(residencia_id: string, patch: Partial<ChecklistItem>) {
     const existing = itemsByResi[residencia_id];
     const row: any = {
@@ -147,6 +168,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       week_start: weekStart,
       weekly_changes_done: existing?.weekly_changes_done ?? false,
       repasado: existing?.repasado ?? false,
+      emblistada: existing?.emblistada ?? false, // NEW
       day_to_make: existing?.day_to_make ?? null,
       day_to_deliver: existing?.day_to_deliver ?? null,
       notes: existing?.notes ?? null,
@@ -163,23 +185,29 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     else setItemsByResi((prev) => ({ ...prev, [residencia_id]: data as ChecklistItem }));
   }
 
+  // -------- UI --------
   function Card({ r }: { r: Residencia }) {
     const it = itemsByResi[r.id];
-    const done = (it?.weekly_changes_done && it?.repasado) ?? false;
+    const done =
+      (it?.weekly_changes_done ?? false) &&
+      (it?.repasado ?? false) &&
+      (it?.emblistada ?? false); // NEW
     const saleToday = it?.day_to_deliver === today;
 
     const color = done
       ? "#14532d"
-      : it?.weekly_changes_done || it?.repasado
+      : it?.weekly_changes_done || it?.repasado || it?.emblistada
       ? "#7c2d12"
       : "#7f1d1d";
     const bg = saleToday
       ? "rgba(59,130,246,.10)"
       : done
       ? "rgba(16,185,129,.10)"
-      : it?.weekly_changes_done || it?.repasado
+      : it?.weekly_changes_done || it?.repasado || it?.emblistada
       ? "rgba(245,158,11,.12)"
       : "rgba(239,68,68,.08)";
+
+    const prepList = Array.isArray(r.prep_on_days) ? r.prep_on_days : [];
 
     return (
       <div
@@ -191,10 +219,17 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           marginBottom: 10,
         }}
       >
-        <div style={{ fontWeight: 600 }}>{r.name}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600 }}>{r.name}</div>
+          <div style={{ fontSize: 12, color: "#94a3b8" }}>
+            Pacientes: <b style={{ color: "#e2e8f0" }}>{r.patients ?? 0}</b> · Plantas:{" "}
+            <b style={{ color: "#e2e8f0" }}>{r.floors ?? 1}</b>
+          </div>
+        </div>
+
         <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-          Sale: <b>{r.fixed_delivery_day}</b> · Prep en:{" "}
-          {r.prep_on_days.join(" / ")} {r.biweekly ? "· c/2 semanas" : ""}
+          Sale: <b style={{ color: "#e2e8f0" }}>{r.fixed_delivery_day}</b> · Prep en:{" "}
+          {prepList.join(" / ")} {r.biweekly ? "· c/2 semanas" : ""}
         </div>
 
         <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
@@ -214,6 +249,16 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             />{" "}
             Repasado
           </label>
+          {/* NEW: Emblistada */}
+          <label style={{ fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={it?.emblistada ?? false}
+              onChange={(e) => savePatch(r.id, { emblistada: e.target.checked })}
+            />{" "}
+              Emblistada
+          </label>
+
           <span
             style={{
               border: "1px solid #2f415a",
@@ -225,6 +270,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           >
             {done ? "✔ Completo" : "Pendiente"}
           </span>
+
           {saleToday && (
             <span
               style={{
@@ -261,9 +307,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             <input
               type="date"
               value={it?.day_to_deliver ?? ""}
-              onChange={(e) =>
-                savePatch(r.id, { day_to_deliver: e.target.value || null })
-              }
+              onChange={(e) => savePatch(r.id, { day_to_deliver: e.target.value || null })}
               style={{
                 padding: "6px 8px",
                 border: "1px solid #334155",
@@ -288,6 +332,73 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               borderRadius: 8,
               background: "#0b1220",
               color: "#e2e8f0",
+            }}
+          />
+        </div>
+
+        {/* Optional quick editors */}
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <label style={{ fontSize: 12, color: "#94a3b8" }}>Editar pacientes</label>
+          <input
+            type="number"
+            min={0}
+            value={r.patients ?? 0}
+            onChange={async (e) => {
+              const val = Math.max(0, Number(e.target.value || 0));
+              const { error } = await supabase
+                .from("residencias")
+                .update({ patients: val })
+                .eq("id", r.id);
+              if (!error)
+                setResis((prev) =>
+                  prev.map((x) => (x.id === r.id ? { ...x, patients: val } : x))
+                );
+              else console.error(error);
+            }}
+            style={{
+              width: 90,
+              padding: "6px 8px",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              background: "#0b1220",
+              color: "#e2e8f0",
+              textAlign: "right",
+            }}
+          />
+
+          <label style={{ fontSize: 12, color: "#94a3b8" }}>Plantas</label>
+          <input
+            type="number"
+            min={1}
+            value={r.floors ?? 1}
+            onChange={async (e) => {
+              const val = Math.max(1, Number(e.target.value || 1));
+              const { error } = await supabase
+                .from("residencias")
+                .update({ floors: val })
+                .eq("id", r.id);
+              if (!error)
+                setResis((prev) =>
+                  prev.map((x) => (x.id === r.id ? { ...x, floors: val } : x))
+                );
+              else console.error(error);
+            }}
+            style={{
+              width: 90,
+              padding: "6px 8px",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              background: "#0b1220",
+              color: "#e2e8f0",
+              textAlign: "right",
             }}
           />
         </div>
@@ -401,12 +512,10 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           >
             Todas
           </button>
-          <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 8 }}>
-            Hoy: {today}
-          </span>
+          <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 8 }}>Hoy: {today}</span>
         </div>
 
-        {/* 5-column layout */}
+        {/* 5 columns grid */}
         <div style={{ display: "grid", gap: 14, gridTemplateColumns: "1fr", marginTop: 16 }}>
           <style>{`@media (min-width: 900px){ .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; }}`}</style>
           <div className="grid5">
@@ -433,9 +542,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
                     {day} · Sale
                   </h3>
                   {list.length === 0 && (
-                    <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                      Sin residencias
-                    </div>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Sin residencias</div>
                   )}
                   {list.map((r) => (
                     <Card key={r.id} r={r} />
@@ -445,11 +552,27 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             })}
           </div>
         </div>
-      </div>
-        <footer style={{ marginTop: 24, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
-          Hecho por BADR
-        </footer>
 
+        {/* Donation footer */}
+        <footer
+          style={{
+            marginTop: 24,
+            textAlign: "center",
+            fontSize: 12,
+            color: "#94a3b8",
+          }}
+        >
+          © 2025 Hecho por Badr ·{" "}
+          <a
+            href="https://www.buymeacoffee.com/badrdev" // <-- tu enlace
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#fbbf24", textDecoration: "underline" }}
+          >
+            ☕ Invítame un café
+          </a>
+        </footer>
+      </div>
     </div>
   );
 }
