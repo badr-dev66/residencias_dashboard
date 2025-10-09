@@ -64,7 +64,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             week_start: weekStart,
             weekly_changes_done: false,
             repasado: false,
-            emblistada: false, // NEW
+            emblistada: false,
             day_to_make: getSuggestedPrepDate(weekStart, r.fixed_delivery_day),
             day_to_deliver: getSuggestedDeliverDate(weekStart, r.fixed_delivery_day),
             notes: null,
@@ -87,19 +87,29 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     })();
   }, [weekStart]);
 
-  // -------- Derived data --------
+  // ------------ FILTERED LIST (fixed "Preparar hoy") ------------
   const filteredResis = useMemo(() => {
     const s = q.trim().toLowerCase();
     const base = s ? resis.filter((r) => r.name.toLowerCase().includes(s)) : resis;
 
-    if (filter === "prepToday") {
-      return base.filter((r) => itemsByResi[r.id]?.day_to_make === today);
-    }
-    if (filter === "deliverToday") {
+    const weekdayToday = new Date().toLocaleDateString("es-ES", {
+      weekday: "long",
+    }) as Weekday;
+
+    const isPrepToday = (r: Residencia) => {
+      const it = itemsByResi[r.id];
+      const explicit = it?.day_to_make || null;
+      const suggested = getSuggestedPrepDate(weekStart, r.fixed_delivery_day);
+      const prepList = Array.isArray(r.prep_on_days) ? r.prep_on_days : [];
+      // If there is an explicit date use that; otherwise use suggestion or prep_on_days list
+      return (explicit ? explicit === today : suggested === today) || prepList.includes(weekdayToday);
+    };
+
+    if (filter === "prepToday") return base.filter(isPrepToday);
+    if (filter === "deliverToday")
       return base.filter((r) => itemsByResi[r.id]?.day_to_deliver === today);
-    }
     return base;
-  }, [q, resis, itemsByResi, filter, today]);
+  }, [q, resis, itemsByResi, filter, today, weekStart]);
 
   const summary = useMemo(() => {
     let prepared = 0,
@@ -110,7 +120,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       const done =
         (it?.weekly_changes_done ?? false) &&
         (it?.repasado ?? false) &&
-        (it?.emblistada ?? false); // NEW
+        (it?.emblistada ?? false);
       if (done) prepared++;
       if (it?.day_to_deliver) delivered++;
       if (!done) pending++;
@@ -133,11 +143,11 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     // Sort by workload: patients desc -> floors desc -> name
     ORDER.forEach((d) =>
       g[d].sort((a, b) => {
-        const pa = a.patients ?? 0;
-        const pb = b.patients ?? 0;
+        const pa = (a as any).patients ?? 0;
+        const pb = (b as any).patients ?? 0;
         if (pb !== pa) return pb - pa;
-        const fa = a.floors ?? 1;
-        const fb = b.floors ?? 1;
+        const fa = (a as any).floors ?? 1;
+        const fb = (b as any).floors ?? 1;
         if (fb !== fa) return fb - fa;
         return a.name.localeCompare(b.name);
       })
@@ -169,7 +179,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       week_start: weekStart,
       weekly_changes_done: existing?.weekly_changes_done ?? false,
       repasado: existing?.repasado ?? false,
-      emblistada: existing?.emblistada ?? false, // NEW
+      emblistada: (existing as any)?.emblistada ?? false,
       day_to_make: existing?.day_to_make ?? null,
       day_to_deliver: existing?.day_to_deliver ?? null,
       notes: existing?.notes ?? null,
@@ -192,19 +202,19 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     const done =
       (it?.weekly_changes_done ?? false) &&
       (it?.repasado ?? false) &&
-      (it?.emblistada ?? false); // NEW
+      ((it as any)?.emblistada ?? false);
     const saleToday = it?.day_to_deliver === today;
 
     const color = done
       ? "#14532d"
-      : it?.weekly_changes_done || it?.repasado || it?.emblistada
+      : it?.weekly_changes_done || it?.repasado || (it as any)?.emblistada
       ? "#7c2d12"
       : "#7f1d1d";
     const bg = saleToday
       ? "rgba(59,130,246,.10)"
       : done
       ? "rgba(16,185,129,.10)"
-      : it?.weekly_changes_done || it?.repasado || it?.emblistada
+      : it?.weekly_changes_done || it?.repasado || (it as any)?.emblistada
       ? "rgba(245,158,11,.12)"
       : "rgba(239,68,68,.08)";
 
@@ -223,14 +233,14 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontWeight: 600 }}>{r.name}</div>
           <div style={{ fontSize: 12, color: "#94a3b8" }}>
-            Pacientes: <b style={{ color: "#e2e8f0" }}>{r.patients ?? 0}</b> · Plantas:{" "}
-            <b style={{ color: "#e2e8f0" }}>{r.floors ?? 1}</b>
+            Pacientes: <b style={{ color: "#e2e8f0" }}>{(r as any).patients ?? 0}</b> · Plantas:{" "}
+            <b style={{ color: "#e2e8f0" }}>{(r as any).floors ?? 1}</b>
           </div>
         </div>
 
         <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
           Sale: <b style={{ color: "#e2e8f0" }}>{r.fixed_delivery_day}</b> · Prep en:{" "}
-          {prepList.join(" / ")} {r.biweekly ? "· c/2 semanas" : ""}
+          {prepList.join(" / ")} {(r as any).biweekly ? "· c/2 semanas" : ""}
         </div>
 
         <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
@@ -250,12 +260,12 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             />{" "}
             Repasado
           </label>
-          {/* NEW: Emblistada */}
+
           <label style={{ fontSize: 13 }}>
             <input
               type="checkbox"
-              checked={it?.emblistada ?? false}
-              onChange={(e) => savePatch(r.id, { emblistada: e.target.checked })}
+              checked={(it as any)?.emblistada ?? false}
+              onChange={(e) => savePatch(r.id, { emblistada: e.target.checked } as any)}
             />{" "}
             Emblistada
           </label>
@@ -337,7 +347,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           />
         </div>
 
-        {/* Optional quick editors */}
+        {/* Quick editors (no spinner arrows) */}
         <div
           style={{
             marginTop: 8,
@@ -350,17 +360,21 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           <label style={{ fontSize: 12, color: "#94a3b8" }}>Editar pacientes</label>
           <input
             type="number"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            step={1}
+            onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
             min={0}
-            value={r.patients ?? 0}
+            value={(r as any).patients ?? 0}
             onChange={async (e) => {
               const val = Math.max(0, Number(e.target.value || 0));
               const { error } = await supabase
                 .from("residencias")
                 .update({ patients: val })
-                .eq("id", r.id);
+                .eq("id", (r as any).id);
               if (!error)
                 setResis((prev) =>
-                  prev.map((x) => (x.id === r.id ? { ...x, patients: val } : x))
+                  prev.map((x: any) => (x.id === (r as any).id ? { ...x, patients: val } : x))
                 );
               else console.error(error);
             }}
@@ -372,23 +386,28 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               background: "#0b1220",
               color: "#e2e8f0",
               textAlign: "right",
+              MozAppearance: "textfield" as any,
             }}
           />
 
           <label style={{ fontSize: 12, color: "#94a3b8" }}>Plantas</label>
           <input
             type="number"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            step={1}
+            onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()}
             min={1}
-            value={r.floors ?? 1}
+            value={(r as any).floors ?? 1}
             onChange={async (e) => {
               const val = Math.max(1, Number(e.target.value || 1));
               const { error } = await supabase
                 .from("residencias")
                 .update({ floors: val })
-                .eq("id", r.id);
+                .eq("id", (r as any).id);
               if (!error)
                 setResis((prev) =>
-                  prev.map((x) => (x.id === r.id ? { ...x, floors: val } : x))
+                  prev.map((x: any) => (x.id === (r as any).id ? { ...x, floors: val } : x))
                 );
               else console.error(error);
             }}
@@ -400,6 +419,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               background: "#0b1220",
               color: "#e2e8f0",
               textAlign: "right",
+              MozAppearance: "textfield" as any,
             }}
           />
         </div>
@@ -409,6 +429,12 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0b1220", color: "#e2e8f0" }}>
+      {/* remove WebKit number spinners */}
+      <style>{`
+        input[type=number]::-webkit-outer-spin-button,
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      `}</style>
+
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
         {/* Header */}
         <header
@@ -546,7 +572,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
                     <div style={{ fontSize: 12, color: "#94a3b8" }}>Sin residencias</div>
                   )}
                   {list.map((r) => (
-                    <Card key={r.id} r={r} />
+                    <Card key={(r as any).id} r={r} />
                   ))}
                 </div>
               );
@@ -565,7 +591,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         >
           © 2025 Hecho por Badr ·{" "}
           <a
-            href="https://www.buymeacoffee.com/badrdev" // <-- tu enlace
+            href="https://www.buymeacoffee.com/badrdev"
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "#fbbf24", textDecoration: "underline" }}
