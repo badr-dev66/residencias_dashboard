@@ -1,5 +1,4 @@
 // src/types.ts
-
 export type Weekday = "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes";
 
 export type Residencia = {
@@ -20,8 +19,8 @@ export type ChecklistItem = {
   weekly_changes_done: boolean;
   repasado: boolean;
   emblistada: boolean; // NEW
-  day_to_make: string | null;    // yyyy-mm-dd
-  day_to_deliver: string | null; // yyyy-mm-dd
+  day_to_make: string | null;
+  day_to_deliver: string | null;
   notes: string | null;
   updated_at: string;
 };

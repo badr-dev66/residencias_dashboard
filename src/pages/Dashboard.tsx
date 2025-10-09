@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import type { ChecklistItem, Residencia, Weekday } from "../types";
+import type { ChecklistItem, Residencia, Weekday } from "../types"; // <-- keep ONE import only
 import {
   getWeekStartISO,
   todayISO,
