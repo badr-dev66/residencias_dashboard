@@ -19,8 +19,8 @@ export type ChecklistItem = {
   weekly_changes_done: boolean;
   repasado: boolean;
   emblistada: boolean; // NEW
-  day_to_make: string | null;
-  day_to_deliver: string | null;
+  day_to_make: string | null;    // yyyy-mm-dd
+  day_to_deliver: string | null; // yyyy-mm-dd
   notes: string | null;
   updated_at: string;
 };

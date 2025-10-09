@@ -1,6 +1,7 @@
+// src/pages/Dashboard.tsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
-import type { ChecklistItem, Residencia, Weekday } from "../types"; // <-- keep ONE import only
+import type { ChecklistItem, Residencia, Weekday } from "../types";
 import {
   getWeekStartISO,
   todayISO,
@@ -53,8 +54,8 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       const map: MapChecklist = {};
       (cdata || []).forEach((it) => (map[it.residencia_id] = it as ChecklistItem));
 
-      // 3) Auto-create missing rows (also fill suggested dates)
-      const patches: any[] = [];
+      // 3) Auto-create missing rows with suggested dates
+      const patches: Partial<ChecklistItem & { residencia_id: string; week_start: string }>[] = [];
       for (const r of residencias) {
         const existing = map[r.id];
         if (!existing) {
@@ -67,7 +68,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             day_to_make: getSuggestedPrepDate(weekStart, r.fixed_delivery_day),
             day_to_deliver: getSuggestedDeliverDate(weekStart, r.fixed_delivery_day),
             notes: null,
-          });
+          } as any);
         }
       }
       if (patches.length > 0) {
@@ -86,7 +87,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     })();
   }, [weekStart]);
 
-  // -------- Derived data (keep hooks BEFORE any early returns) --------
+  // -------- Derived data --------
   const filteredResis = useMemo(() => {
     const s = q.trim().toLowerCase();
     const base = s ? resis.filter((r) => r.name.toLowerCase().includes(s)) : resis;
@@ -256,7 +257,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               checked={it?.emblistada ?? false}
               onChange={(e) => savePatch(r.id, { emblistada: e.target.checked })}
             />{" "}
-              Emblistada
+            Emblistada
           </label>
 
           <span
